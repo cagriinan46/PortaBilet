@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return auth_service.get_user_from_token(db, token)
 
 
+def require_admin(current_user: models.User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Bu işlem için admin yetkisi gerekiyor")
+    return current_user
+
+
 @router.get("/me")
 def get_my_profile(current_user: models.User = Depends(get_current_user)):
     return auth_service.get_my_profile(current_user)
@@ -61,6 +67,6 @@ def update_email_notif(request: EmailNotifRequest, current_user: models.User = D
     return auth_service.update_email_notifications(db, current_user, request)
 
 
-@router.get("/make-admin/{email}")
-def make_admin(email: str, db: Session = Depends(get_db)):
+@router.post("/make-admin/{email}")
+def make_admin(email: str, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     return auth_service.make_admin(db, email)
