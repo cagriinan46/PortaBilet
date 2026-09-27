@@ -1,10 +1,11 @@
 terraform {
   backend "s3" {
-    bucket       = "bilet-tf-state2"
-    key          = "vpc/terraform.tfstate"
-    region       = "eu-central-1"
-    use_lockfile = true
-    encrypt      = true
+    bucket              = "portabilet-tf-state-069347174731"
+    key                 = "vpc/terraform.tfstate"
+    region              = "eu-central-1"
+    use_lockfile        = true
+    encrypt             = true
+    allowed_account_ids = ["069347174731"]
   }
   required_providers {
     aws = {
@@ -15,5 +16,6 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region              = var.aws_region
+  allowed_account_ids = ["069347174731"]
 }
