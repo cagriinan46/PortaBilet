@@ -7,17 +7,12 @@ on:
     paths:
       - 'bilet-backend/**'
       - '.github/workflows/backend-ci.yml'
-
   pull_request:
     branches: 
       - main
-    paths:
-      - 'bilet-backend/**'
-      - '.github/workflows/backend-ci.yml'
 
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,13 +23,10 @@ env:
 jobs:
   backend:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: bilet-backend
-
     timeout-minutes: 5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -51,3 +43,64 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
+  
+  deploy:
+    needs: backend
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      
+      - name: Deploy API
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ vars.API_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "sudo -u ec2-user git -C /home/ec2-user/app fetch origin main",
+                "sudo -u ec2-user git -C /home/ec2-user/app reset --hard ${{ github.sha }}",
+                "sudo -u ec2-user /home/ec2-user/app/bilet-backend/venv/bin/python -m pip install -r /home/ec2-user/app/bilet-backend/requirements.txt",
+                "systemctl restart ticket-producer",
+                "systemctl is-active --quiet ticket-producer"
+              ]
+            }' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ vars.API_INSTANCE_ID }}"
+
+      - name: Deploy Worker
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ vars.WORKER_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "sudo -u ec2-user git -C /home/ec2-user/app fetch origin main",
+                "sudo -u ec2-user git -C /home/ec2-user/app reset --hard ${{ github.sha }}",
+                "sudo -u ec2-user /home/ec2-user/app/bilet-backend/venv/bin/python -m pip install -r /home/ec2-user/app/bilet-backend/requirements.txt",
+                "systemctl restart ticket-consumer",
+                "systemctl is-active --quiet ticket-consumer"
+              ]
+            }' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ vars.WORKER_INSTANCE_ID }}"
+
+
+    
+    
+

@@ -7,17 +7,12 @@ on:
     paths:
       - 'bilet-frontend/**'
       - '.github/workflows/frontend-ci.yml'
-
   pull_request:
     branches:
       - main
-    paths:
-      - 'bilet-frontend/**'
-      - '.github/workflows/frontend-ci.yml'
 
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,13 +23,11 @@ env:
 jobs:
   frontend:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: bilet-frontend
-    
     timeout-minutes: 5
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
