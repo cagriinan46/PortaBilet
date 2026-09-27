@@ -41,3 +41,21 @@ variable "sender_app_password" { type = string }
 variable "oauth2_secret_key" { type = string }
 variable "openweather_api_key" { type = string }
 variable "gemini_api_key" { type = string }
+
+variable "ollama_model" {
+  description = "Ollama model to pull and run"
+  type        = string
+  default     = "qwen2.5:7b"
+}
+
+variable "ollama_instance_type" {
+  description = "EC2 instance type for Ollama server"
+  type        = string
+  default     = "t3.large"
+}
+
+variable "app_branch" {
+  description = "Git branch to deploy on EC2 instances"
+  type        = string
+  default     = "main"
+}

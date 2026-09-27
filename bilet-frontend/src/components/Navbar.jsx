@@ -11,12 +11,20 @@ function Navbar() {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const aiModalOverlayRef = useRef(null);
+  const chatMessagesRef = useRef(null);
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiInput, setAiInput] = useState('');
+  const [aiMessages, setAiMessages] = useState([
+    { role: 'assistant', content: 'Nasıl bir etkinlik arıyorsunuz?' }
+  ]);
   const [isAiSearching, setIsAiSearching] = useState(false);
   const [aiEvents, setAiEvents] = useState([]);
   const [aiFiltersApplied, setAiFiltersApplied] = useState(null);
+  const [aiSlotState, setAiSlotState] = useState(null);
+  const [aiNeedsClarification, setAiNeedsClarification] = useState(false);
+  const [aiShouldSearch, setAiShouldSearch] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState([]);
 
@@ -46,6 +54,19 @@ function Navbar() {
     }
   }, [isAiModalOpen, isLoggedIn, backendUrl]);
 
+  useEffect(() => {
+    if (isAiModalOpen) {
+      aiModalOverlayRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [isAiModalOpen]);
+
+  useEffect(() => {
+    if (isAiModalOpen && chatMessagesRef.current) {
+      const chatBox = chatMessagesRef.current;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  }, [aiMessages, isAiSearching, isAiModalOpen]);
+
   const handleLogout = () => {
     localStorage.clear(); 
     setIsDropdownOpen(false);
@@ -53,35 +74,141 @@ function Navbar() {
     navigate('/login');
   };
 
+  const readApiResponse = async (response) => {
+    const text = await response.text();
+    if (!text) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { detail: text };
+    }
+  };
+
+  const getApiErrorMessage = (data, fallback) => {
+    if (typeof data?.detail === 'string') return data.detail;
+    if (typeof data?.detail?.message === 'string') return data.detail.message;
+    if (typeof data?.message === 'string') return data.message;
+    return fallback;
+  };
+
+  const requestAiChat = async (prompt, nextMessages, currentFilters, currentSlotState) => {
+    if (!backendUrl) {
+      console.error("AI chat backend URL tanımlı değil", { backendUrl });
+      throw new Error("AI servisi için backend adresi tanımlı değil.");
+    }
+
+    const aiChatUrl = `${backendUrl}/api/events/ai-chat`;
+    let response;
+
+    try {
+      response = await fetch(aiChatUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: nextMessages.map(message => ({
+            role: message.role,
+            content: message.content
+          })),
+          current_filters: currentFilters,
+          slot_state: currentSlotState
+        })
+      });
+    } catch (err) {
+      console.error("AI chat fetch başarısız oldu", {
+        url: aiChatUrl,
+        backendUrl,
+        prompt,
+        error: err
+      });
+      throw new Error("AI servisine ulaşılamıyor. Backend bağlantısı veya CORS ayarlarını kontrol edin.");
+    }
+
+    const data = await readApiResponse(response);
+
+    if (response.status === 405) {
+      console.error("AI chat endpoint method hatası", {
+        url: aiChatUrl,
+        status: response.status,
+        statusText: response.statusText,
+        responseBody: data
+      });
+      throw new Error("AI chat endpoint'i backend'de aktif değil. Yeni /api/events/ai-chat kodunu deploy etmek gerekiyor.");
+    }
+
+    if (!response.ok) {
+      console.error("AI chat backend hata döndü", {
+        url: aiChatUrl,
+        status: response.status,
+        statusText: response.statusText,
+        responseBody: data
+      });
+      throw new Error(getApiErrorMessage(data, "AI sohbetinde bir hata oluştu."));
+    }
+
+    return data;
+  };
+
   const handleAiSearch = async () => {
-    if (!aiPrompt.trim()) return;
+    const prompt = aiInput.trim();
+    if (!prompt || isAiSearching) return;
+
+    const userMessage = { role: 'user', content: prompt };
+    const nextMessages = [...aiMessages, userMessage];
+    const currentFilters = aiFiltersApplied;
+    const currentSlotState = aiSlotState;
+
+    setAiMessages(nextMessages);
+    setAiInput('');
+    setAiEvents([]);
+    setAiNeedsClarification(false);
+    setAiShouldSearch(false);
     setIsAiSearching(true);
     setHasSearched(true);
     
     try {
-      const response = await fetch(`${backendUrl}/api/events/ai-search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: aiPrompt })
-      });
+      const data = await requestAiChat(prompt, nextMessages, currentFilters, currentSlotState);
+
+      const foundEvents = Array.isArray(data.events) ? data.events : [];
+      const shouldSearch = Boolean(data.should_search);
+      const assistantMessage = {
+        role: 'assistant',
+        content: data.reply || "Aramanı değerlendirdim."
+      };
+
+      setAiMessages([...nextMessages, assistantMessage]);
+      setAiEvents(foundEvents);
+      setAiFiltersApplied(data.filters_applied || data.llm_extracted_data || null);
+      setAiSlotState(data.slot_state || null);
+      setAiNeedsClarification(Boolean(data.needs_clarification));
+      setAiShouldSearch(shouldSearch);
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || "Yapay zeka aramasında bir hata oluştu.");
+      if (data.needs_clarification) {
+        return;
       }
 
-      setAiEvents(data.events);
-      setAiFiltersApplied(data.filters_applied);
-      
-      if (data.events.length > 0) {
-        toast.success(`Yapay zeka ${data.events.length} etkinlik buldu!`);
+      if (!shouldSearch) {
+        return;
+      }
+
+      if (foundEvents.length > 0) {
+        toast.success(`Yapay zeka ${foundEvents.length} etkinlik buldu!`);
       } else {
         toast("Bu tarihlere veya kriterlere uygun etkinlik yok.", { icon: '🔍' });
       }
       
     } catch (err) {
-      toast.error(err.message);
+      console.error("AI chat modal isteği tamamlanamadı", {
+        backendUrl,
+        prompt,
+        error: err
+      });
+      const errorMessage = err.message || "AI sohbetinde bir hata oluştu.";
+      setAiMessages([
+        ...nextMessages,
+        { role: 'assistant', content: errorMessage }
+      ]);
+      toast.error(errorMessage);
     } finally {
       setIsAiSearching(false);
     }
@@ -107,7 +234,7 @@ function Navbar() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail);
-      toast.success(data.message);
+      toast.success(data.mesaj || data.message || "Favoriler güncellendi.");
     } catch (err) {
       toast.error(err.message);
     }
@@ -229,9 +356,12 @@ function Navbar() {
       </nav>
 
       {isAiModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-gray-900/60 backdrop-blur-sm flex justify-center items-start pt-10 md:pt-20 px-4 overflow-y-auto">
+        <div
+          ref={aiModalOverlayRef}
+          className="fixed inset-0 z-[100] bg-gray-900/60 backdrop-blur-sm flex justify-center items-start p-3 sm:p-4 md:p-6 overflow-y-auto"
+        >
           
-          <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden border border-orange-100 flex flex-col relative mb-10">
+          <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden border border-orange-100 flex flex-col relative">
             
             <div className="p-6 md:p-8 bg-gradient-to-b from-orange-50 to-white border-b border-orange-100 relative">
               <button 
@@ -248,26 +378,52 @@ function Navbar() {
                 Yapay Zeka ile <span className="text-orange-500">Etkinlik Bul</span>
               </h2>
 
-              <div className="flex flex-col md:flex-row gap-3">
+              <div ref={chatMessagesRef} className="bg-white border border-orange-100 rounded-2xl p-4 h-72 overflow-y-auto shadow-inner space-y-3">
+                {aiMessages.map((message, index) => (
+                  <div key={`${message.role}-${index}`} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm md:text-base font-medium shadow-sm ${
+                      message.role === 'user'
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-br-md'
+                        : 'bg-gray-100 text-gray-700 rounded-bl-md'
+                    }`}>
+                      {message.content}
+                    </div>
+                  </div>
+                ))}
+                {isAiSearching && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 text-orange-500 px-4 py-3 rounded-2xl rounded-bl-md text-sm md:text-base font-bold shadow-sm animate-pulse">
+                      Yanıt hazırlanıyor...
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleAiSearch();
+                }}
+                className="flex flex-col md:flex-row gap-3 mt-4"
+              >
                 <div className="flex-grow relative">
                   <svg className="w-6 h-6 text-orange-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                   <input 
                     type="text" 
-                    value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAiSearch()}
-                    placeholder="Örn: 20-30 Mayıs arası İstanbul'da tiyatro var mı?" 
+                    value={aiInput}
+                    onChange={(e) => setAiInput(e.target.value)}
+                    placeholder="Örn: Bu hafta İstanbul'da tiyatro var mı?"
                     className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition-all text-gray-700 shadow-sm text-lg"
                   />
                 </div>
                 <button 
-                  onClick={handleAiSearch}
-                  disabled={!aiPrompt.trim() || isAiSearching}
+                  type="submit"
+                  disabled={!aiInput.trim() || isAiSearching}
                   className="bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold py-4 px-10 rounded-2xl hover:scale-105 transition-transform disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center shadow-md text-lg"
                 >
-                  {isAiSearching ? 'Aranıyor...' : 'Ara'}
+                  {isAiSearching ? 'Aranıyor...' : 'Gönder'}
                 </button>
-              </div>
+              </form>
 
               {hasSearched && !isAiSearching && aiFiltersApplied && (
                 <div className="mt-4 flex flex-wrap gap-2 items-center text-sm">
@@ -286,11 +442,21 @@ function Navbar() {
               )}
             </div>
 
-            <div className="p-6 md:p-8 bg-gray-50 flex-grow overflow-y-auto max-h-[60vh]">
+            <div className="p-6 md:p-8 bg-gray-50 h-[34rem] shrink-0 overflow-y-auto">
               {isAiSearching ? (
                 <div className="py-20 text-center">
                   <div className="inline-block w-12 h-12 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mb-4"></div>
-                  <p className="text-orange-500 font-extrabold text-xl animate-pulse">Sizin için en iyi etkinlikler taranıyor...</p>
+                  <p className="text-orange-500 font-extrabold text-xl animate-pulse">Asistan yanıt hazırlıyor...</p>
+                </div>
+              ) : hasSearched && aiNeedsClarification ? (
+                <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-gray-600 font-bold text-lg">Cevabınızı bekliyorum.</p>
+                  <p className="text-gray-400 mt-2">Detayı yazdığınızda uygun etkinlikleri burada göstereceğim.</p>
+                </div>
+              ) : hasSearched && !aiShouldSearch ? (
+                <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-gray-600 font-bold text-lg">Arama yapılmadı.</p>
+                  <p className="text-gray-400 mt-2">Hazır olduğunuzda arama yapmamı söyleyin, etkinlikleri burada göstereceğim.</p>
                 </div>
               ) : hasSearched ? (
                 aiEvents.length === 0 ? (
@@ -312,7 +478,14 @@ function Navbar() {
                         const isSoldOut = event.available_tickets === 0;
 
                         return (
-                          <div key={event.id} className="relative" onClick={closeModal}>
+                          <div
+                            key={event.id}
+                            className="relative"
+                            onClick={(e) => {
+                              if (e.target.closest('button')) return;
+                              closeModal();
+                            }}
+                          >
                             {isSoldOut && (
                               <div className="absolute -top-3 -right-3 z-20 bg-gray-900 text-white font-black text-xs px-4 py-2 rounded-full shadow-lg border-2 border-white transform rotate-3">
                                 TÜKENDİ
