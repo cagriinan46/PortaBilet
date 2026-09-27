@@ -361,7 +361,7 @@ function Navbar() {
           className="fixed inset-0 z-[100] bg-gray-900/60 backdrop-blur-sm flex justify-center items-start p-3 sm:p-4 md:p-6 overflow-y-auto"
         >
           
-          <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden border border-orange-100 flex flex-col relative max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-2rem)] md:max-h-[calc(100vh-3rem)]">
+          <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden border border-orange-100 flex flex-col relative">
             
             <div className="p-6 md:p-8 bg-gradient-to-b from-orange-50 to-white border-b border-orange-100 relative">
               <button 
@@ -442,7 +442,7 @@ function Navbar() {
               )}
             </div>
 
-            <div className="p-6 md:p-8 bg-gray-50 flex-grow overflow-y-auto max-h-[60vh] min-h-0">
+            <div className="p-6 md:p-8 bg-gray-50 h-[34rem] shrink-0 overflow-y-auto">
               {isAiSearching ? (
                 <div className="py-20 text-center">
                   <div className="inline-block w-12 h-12 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mb-4"></div>
