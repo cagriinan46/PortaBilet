@@ -74,7 +74,7 @@ function Settings() {
       } else {
         toast.success(newValue ? "E-Posta bildirimleri açıldı!" : "E-Posta bildirimleri kapatıldı.");
       }
-    } catch (err) {
+    } catch {
       setEmailNotif(!newValue);
       toast.error("Bağlantı hatası.");
     }

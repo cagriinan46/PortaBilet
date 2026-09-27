@@ -32,7 +32,7 @@ function Admin() {
         const data = await response.json();
         setEvents(data);
       }
-    } catch (error) {
+    } catch {
       toast.error('Etkinlikler yüklenirken hata oluştu.');
     }
   };

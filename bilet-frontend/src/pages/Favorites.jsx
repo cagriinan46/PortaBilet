@@ -56,7 +56,7 @@ function Favorites() {
         toast.success("Favorilere eklendi", { icon: '❤️' });
       }
 
-    } catch (err) {
+    } catch {
       toast.error("İşlem başarısız oldu.");
     }
   };
