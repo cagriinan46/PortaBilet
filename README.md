@@ -183,7 +183,15 @@ The application also includes deterministic handling for common requests and fal
 
 ## Deployment Model
 
-The current project does not rely on a GitHub Actions deployment pipeline.
+GitHub Actions tests the backend and frontend on pull requests. Changes to either
+application on `main` trigger its deployment workflow: the backend is updated
+through AWS Systems Manager, and the frontend is uploaded to S3 with a
+CloudFront cache invalidation.
+
+The Terraform workflow checks formatting and validates the configuration on
+pull requests and `main` pushes. To run an infrastructure plan or apply, start
+the **Terraform CI/CD** workflow manually from `main` and select `plan` or
+`apply`. The workflow creates a fresh plan before applying it.
 
 Terraform provisions the EC2 instances and their bootstrap process is handled through EC2 `user_data`.
 
@@ -220,7 +228,9 @@ The API and worker are configured as `systemd` services so they can restart auto
 
 Terraform uses an Amazon S3 backend for remote state storage.
 
-The test deployment and its state bucket have been destroyed. A new state bucket must be created before running `terraform init` for a future deployment.
+The S3 state bucket and state object are currently present. If the bucket is
+removed, recreate it before running `terraform init` or the Terraform deploy
+job. Do not create a new empty state for infrastructure that still exists.
 
 The backend configuration uses:
 
@@ -230,6 +240,14 @@ The backend configuration uses:
 - AWS account restriction
 
 This keeps infrastructure state outside the local development machine.
+
+The Terraform deploy job needs a `TERRAFORM_ROLE_ARN` repository variable for
+an AWS OIDC role trusted by the `main` branch, with access to the state bucket
+and the infrastructure managed here. It also needs these repository secrets:
+`TF_VAR_DB_PASSWORD`, `TF_VAR_IYZICO_API_KEY`, `TF_VAR_IYZICO_SECRET_KEY`,
+`TF_VAR_SENDER_MAIL`, `TF_VAR_SENDER_APP_PASSWORD`, `TF_VAR_OAUTH2_SECRET_KEY`,
+`TF_VAR_OPENWEATHER_API_KEY`, and `TF_VAR_GEMINI_API_KEY`. Pull request validation
+does not use AWS credentials or these secrets.
 
 ## Tech Stack
 
